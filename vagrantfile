@@ -1,0 +1,64 @@
+# -*- mode: ruby -*-
+# vi: set ft=ruby :
+
+# Vagrantfile API/syntax version. Don't touch unless you know what you're doing!
+VAGRANTFILE_API_VERSION = "2"
+
+vmgmt01t_ip = "10.10.8.100"
+cassandraservers = {
+  :vcas01t => '10.10.8.101',
+  :vcas02t => '10.10.8.102',
+  :vcas03t => '10.10.8.103'
+}
+
+Vagrant.configure(VAGRANTFILE_API_VERSION) do |config|
+  # All Vagrant configuration is done here. The most common configuration
+  # options are documented and commented below. For a complete reference,
+  # please see the online documentation at vagrantup.com.
+   
+  
+  config.vm.box="ubuntu/xenial64"
+  config.vm.provider :virtualbox do |vb|
+    vb.check_guest_additions = false
+    vb.functional_vboxsf = false
+    vb.cpus = 1
+    vb.memory = 2048
+  end  
+ 
+  cassandraservers.each_with_index do |(server, ip), idx|
+    config.vm.define server do |cassandra|
+      cassandra.vm.network :private_network, ip: ip
+	  config.vm.hostname = "#{server}.foocorp.test"
+      ## For masterless, mount your file roots file root
+      config.vm.synced_folder "salt/roots/", "/srv/"
+	  config.vm.synced_folder "scripts", "/scripts"
+	  config.vm.provision "shell", inline: "sudo /scripts/provision-networkc.sh"
+	  config.vm.provision :reload
+      config.vm.provision :salt do |salt|
+        salt.minion_config = "salt/minion"
+        
+        # Export cassandra hostnames
+        salt.pillar({
+          "cassandra" => {
+            "name" => server,
+            "ip" => ip,
+            "seeds" => cassandraservers.values.join(",")
+          }
+        })
+
+        salt.run_highstate = true
+        # Uncomment the next line to get more information about what Salt is doing
+        salt.verbose = true
+        config.vm.provision "shell", inline: "sudo /scripts/provision-cassandra.sh"
+      end
+    end
+    
+  end
+  config.vm.define "vmgmt01t" do |config|
+    config.vm.network "private_network", ip: vmgmt01t_ip
+    config.vm.hostname = "vmgmt01t.foocorp.test"
+    config.vm.synced_folder "scripts", "/scripts"
+	config.vm.provision "shell", inline: "sudo /scripts/provision-networkm.sh"
+	config.vm.provision :reload
+  end
+end
